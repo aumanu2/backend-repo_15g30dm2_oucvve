@@ -1,48 +1,56 @@
 """
-Database Schemas
+Database Schemas for cutConnect
 
-Define your MongoDB collection schemas here using Pydantic models.
-These schemas are used for data validation in your application.
+Each Pydantic model below represents a MongoDB collection. The collection name
+is the lowercase of the class name (e.g., Barber -> "barber").
 
-Each Pydantic model represents a collection in your database.
-Model name is converted to lowercase for the collection name:
-- User -> "user" collection
-- Product -> "product" collection
-- BlogPost -> "blogs" collection
+These schemas validate data for barbers, their services/portfolio, clients, and
+appointments (in-store or at-home).
 """
+from pydantic import BaseModel, Field, EmailStr
+from typing import List, Optional, Literal
+from datetime import datetime
 
-from pydantic import BaseModel, Field
-from typing import Optional
+# -----------------------------
+# EMBEDDED MODELS
+# -----------------------------
+class Service(BaseModel):
+    name: str = Field(..., description="Service name, e.g., 'Fade', 'Beard Trim'")
+    duration_minutes: int = Field(..., ge=5, le=600, description="Estimated duration")
+    price: float = Field(..., ge=0, description="Price in USD")
+    description: Optional[str] = Field(None, description="Service details")
 
-# Example schemas (replace with your own):
+class PortfolioItem(BaseModel):
+    image_url: str = Field(..., description="Public image URL of the work")
+    caption: Optional[str] = Field(None, description="Short caption/notes")
 
-class User(BaseModel):
-    """
-    Users collection schema
-    Collection name: "user" (lowercase of class name)
-    """
-    name: str = Field(..., description="Full name")
-    email: str = Field(..., description="Email address")
-    address: str = Field(..., description="Address")
-    age: Optional[int] = Field(None, ge=0, le=120, description="Age in years")
-    is_active: bool = Field(True, description="Whether user is active")
+class Location(BaseModel):
+    type: Literal["in_store", "at_home"] = Field(..., description="Appointment type")
+    address: Optional[str] = Field(None, description="Required when type is at_home")
 
-class Product(BaseModel):
-    """
-    Products collection schema
-    Collection name: "product" (lowercase of class name)
-    """
-    title: str = Field(..., description="Product title")
-    description: Optional[str] = Field(None, description="Product description")
-    price: float = Field(..., ge=0, description="Price in dollars")
-    category: str = Field(..., description="Product category")
-    in_stock: bool = Field(True, description="Whether product is in stock")
+# -----------------------------
+# TOP-LEVEL COLLECTIONS
+# -----------------------------
+class Barber(BaseModel):
+    name: str = Field(..., description="Barber's display name")
+    bio: Optional[str] = Field(None, description="Short bio/about")
+    avatar_url: Optional[str] = Field(None, description="Profile image URL")
+    shop_name: Optional[str] = Field(None, description="Shop name if applicable")
+    shop_address: Optional[str] = Field(None, description="Shop address if in-store offered")
+    services: List[Service] = Field(default_factory=list, description="Services offered")
+    portfolio: List[PortfolioItem] = Field(default_factory=list, description="Portfolio items")
+    rating: Optional[float] = Field(0, ge=0, le=5, description="Average rating")
 
-# Add your own schemas here:
-# --------------------------------------------------
+class Client(BaseModel):
+    name: str
+    email: EmailStr
+    phone: Optional[str] = None
 
-# Note: The Flames database viewer will automatically:
-# 1. Read these schemas from GET /schema endpoint
-# 2. Use them for document validation when creating/editing
-# 3. Handle all database operations (CRUD) directly
-# 4. You don't need to create any database endpoints!
+class Appointment(BaseModel):
+    barber_id: str = Field(..., description="Associated barber _id as string")
+    client: Client
+    service_name: str = Field(..., description="Name of selected service")
+    start_time: datetime = Field(..., description="Appointment start in ISO 8601")
+    location: Location
+    notes: Optional[str] = None
+    status: Literal["pending", "confirmed", "cancelled"] = "pending"

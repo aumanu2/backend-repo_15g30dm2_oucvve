@@ -1,8 +1,15 @@
 import os
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime
+from typing import List, Optional
 
-app = FastAPI()
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from database import db, create_document, get_documents
+from schemas import Barber, Appointment
+
+app = FastAPI(title="cutConnect API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -13,16 +20,11 @@ app.add_middleware(
 )
 
 @app.get("/")
-def read_root():
-    return {"message": "Hello from FastAPI Backend!"}
-
-@app.get("/api/hello")
-def hello():
-    return {"message": "Hello from the backend API!"}
+def root():
+    return {"name": "cutConnect", "status": "ok"}
 
 @app.get("/test")
 def test_database():
-    """Test endpoint to check if database is available and accessible"""
     response = {
         "backend": "✅ Running",
         "database": "❌ Not Available",
@@ -31,39 +33,72 @@ def test_database():
         "connection_status": "Not Connected",
         "collections": []
     }
-    
     try:
-        # Try to import database module
-        from database import db
-        
         if db is not None:
             response["database"] = "✅ Available"
-            response["database_url"] = "✅ Configured"
-            response["database_name"] = db.name if hasattr(db, 'name') else "✅ Connected"
+            response["database_url"] = "✅ Set" if os.getenv("DATABASE_URL") else "❌ Not Set"
+            response["database_name"] = os.getenv("DATABASE_NAME") or ""
             response["connection_status"] = "Connected"
-            
-            # Try to list collections to verify connectivity
             try:
                 collections = db.list_collection_names()
-                response["collections"] = collections[:10]  # Show first 10 collections
+                response["collections"] = collections[:10]
                 response["database"] = "✅ Connected & Working"
             except Exception as e:
                 response["database"] = f"⚠️  Connected but Error: {str(e)[:50]}"
         else:
             response["database"] = "⚠️  Available but not initialized"
-            
-    except ImportError:
-        response["database"] = "❌ Database module not found (run enable-database first)"
     except Exception as e:
         response["database"] = f"❌ Error: {str(e)[:50]}"
-    
-    # Check environment variables
-    import os
-    response["database_url"] = "✅ Set" if os.getenv("DATABASE_URL") else "❌ Not Set"
-    response["database_name"] = "✅ Set" if os.getenv("DATABASE_NAME") else "❌ Not Set"
-    
     return response
 
+# -----------------------------
+# Barber Endpoints
+# -----------------------------
+
+@app.post("/api/barbers", response_model=dict)
+def create_barber(barber: Barber):
+    barber_id = create_document("barber", barber)
+    return {"id": barber_id}
+
+@app.get("/api/barbers", response_model=List[dict])
+def list_barbers(limit: Optional[int] = 50):
+    docs = get_documents("barber", limit=limit)
+    # Convert ObjectIds to strings
+    for d in docs:
+        d["_id"] = str(d["_id"]) 
+    return docs
+
+# -----------------------------
+# Appointment Endpoints
+# -----------------------------
+
+class AppointmentCreate(Appointment):
+    pass
+
+@app.post("/api/appointments", response_model=dict)
+def create_appointment(appt: AppointmentCreate):
+    # Basic guard: ensure referenced barber exists
+    from bson import ObjectId
+    try:
+        barber_oid = ObjectId(appt.barber_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid barber_id")
+
+    if db["barber"].count_documents({"_id": barber_oid}) == 0:
+        raise HTTPException(status_code=404, detail="Barber not found")
+
+    appt_id = create_document("appointment", appt)
+    return {"id": appt_id}
+
+@app.get("/api/appointments", response_model=List[dict])
+def list_appointments(barber_id: Optional[str] = None, limit: Optional[int] = 50):
+    q = {}
+    if barber_id:
+        q["barber_id"] = barber_id
+    docs = get_documents("appointment", filter_dict=q, limit=limit)
+    for d in docs:
+        d["_id"] = str(d["_id"]) 
+    return docs
 
 if __name__ == "__main__":
     import uvicorn
